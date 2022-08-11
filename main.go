@@ -2,46 +2,60 @@ package main
 
 import (
 	"log"
+	"math/rand"
 	"net"
 	_ "net/http/pprof"
 	"time"
 
+	"event/components/container"
+
 	"event/core/chat"
-	"event/lib/gopool"
 
 	"github.com/gobwas/ws"
-	_ "github.com/grpc-boot/base"
+	"github.com/grpc-boot/base"
+	"github.com/grpc-boot/base/core/gopool"
 	"github.com/mailru/easygo/netpoll"
 )
 
 func init() {
-
+	rand.Seed(time.Now().UnixNano())
 }
 
 func main() {
+	var (
+		err    error
+		poller netpoll.Poller
+		pool   *gopool.Pool
+	)
 
-	poller, err := netpoll.New(nil)
+	conf := container.DefaultContainer.Config()
+	poller, err = netpoll.New(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	pool, err = base.NewGoPool(int(conf.App.MaxWorkers),
+		gopool.WithQueueLength(32),
+		gopool.WithSpawnSize(1),
+	)
+
 	var (
-		pool = gopool.NewPool(*workers, *queue, 1)
 		chat = chat.NewChat(pool)
 		exit = make(chan struct{})
 	)
+
 	// handle is a new incoming connection handler.
 	// It upgrades TCP connection to WebSocket, registers netpoll listener on
 	// it and stores it as a chat user in Chat instance.
 	//
 	// We will call it below within accept() loop.
 	handle := func(conn net.Conn) {
-		// NOTE: we wrap conn here to show that ws could work with any kind of
-		// io.ReadWriter.
-		safeConn := deadliner{conn, *ioTimeout}
+		var (
+			hs ws.Handshake
+		)
+		safeConn := deadliner{conn, time.Millisecond * time.Duration(conf.App.IoTimeoutMs)}
 
-		// Zero-copy upgrade to WebSocket connection.
-		hs, err := ws.Upgrade(safeConn)
+		hs, err = ws.Upgrade(safeConn)
 		if err != nil {
 			log.Printf("%s: upgrade error: %v", nameConn(conn), err)
 			conn.Close()
@@ -84,8 +98,7 @@ func main() {
 		})
 	}
 
-	// Create incoming connections listener.
-	ln, err := net.Listen("tcp", *addr)
+	ln, err := net.Listen("tcp", conf.App.Addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -102,13 +115,8 @@ func main() {
 	// results.
 	accept := make(chan error, 1)
 
-	// Subscribe to events about listener.
 	poller.Start(acceptDesc, func(e netpoll.Event) {
-		// We do not want to accept incoming connection when goroutine pool is
-		// busy. So if there are no free goroutines during 1ms we want to
-		// cooldown the server and do not receive connection for some short
-		// time.
-		err := pool.SubmitTimeout(time.Millisecond, func() {
+		err = pool.SubmitTimeout(time.Millisecond, func() {
 			conn, err := ln.Accept()
 			if err != nil {
 				accept <- err
@@ -122,7 +130,7 @@ func main() {
 			err = <-accept
 		}
 		if err != nil {
-			if err != gopool.ErrScheduleTimeout {
+			if err != gopool.ErrSubmitTimeout {
 				goto cooldown
 			}
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
@@ -147,8 +155,6 @@ func nameConn(conn net.Conn) string {
 	return conn.LocalAddr().String() + " > " + conn.RemoteAddr().String()
 }
 
-// deadliner is a wrapper around net.Conn that sets read/write deadlines before
-// every Read() or Write() call.
 type deadliner struct {
 	net.Conn
 	t time.Duration
