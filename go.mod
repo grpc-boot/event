@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/gobwas/ws v1.1.0
-	github.com/grpc-boot/base v1.1.5
+	github.com/grpc-boot/base v1.1.16
 	github.com/mailru/easygo v0.0.0-20190618140210-3c14a0dc985f
 	go.uber.org/zap v1.20.0
 )
