@@ -2,17 +2,19 @@ package main
 
 import (
 	"math/rand"
-	"net"
 	_ "net/http/pprof"
+	"runtime"
 	"time"
 
 	"event/components/config"
 	"event/components/container"
 	"event/components/logger"
-	"event/core/websocket"
+	"event/core/server"
 
+	"github.com/Allenxuxu/gev"
+	"github.com/Allenxuxu/gev/plugins/websocket"
+	"github.com/Allenxuxu/gev/plugins/websocket/ws"
 	"github.com/grpc-boot/base"
-	"github.com/grpc-boot/base/core/gopool"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -36,44 +38,47 @@ func init() {
 
 func main() {
 	var (
-		err    error
-		pool   *gopool.Pool
-		server websocket.Server
+		err error
 	)
 
 	conf := container.DefaultContainer.Config()
 
-	pool, err = base.NewGoPool(int(conf.App.MaxWorkers),
-		gopool.WithQueueLength(32),
-		gopool.WithSpawnSize(1),
-	)
-
-	server, err = websocket.NewServer(
-		websocket.WithGopool(pool),
-	)
-	if err != nil {
-		base.ZapFatal("new websocket server failed",
-			zap.Error(err),
-		)
-	}
-
-	ln, err := net.Listen("tcp", conf.App.Addr)
-	if err != nil {
-		base.ZapFatal("listen addr failed",
-			zap.Error(err),
-		)
-	}
-
-	server.OnStart(func(s websocket.Server) error {
-		base.ZapInfo("server has started",
-			zap.String("Addr", ln.Addr().String()),
+	wsUpgrader := &ws.Upgrader{}
+	wsUpgrader.OnHeader = func(c *gev.Connection, key, value []byte) error {
+		base.ZapInfo("header",
+			zap.ByteString("Key", key),
+			zap.ByteString("Value", value),
 		)
 		return nil
-	})
+	}
 
-	if err = server.Serve(ln); err != nil {
-		base.ZapFatal("serve failed",
+	wsUpgrader.OnRequest = func(c *gev.Connection, uri []byte) error {
+		base.ZapInfo("request",
+			zap.ByteString("Uri", uri),
+			zap.String("Event", "OnRequest"),
+		)
+		return nil
+	}
+
+	handler := server.NewServer()
+	go func() {
+		tick := time.NewTicker(time.Second)
+		for range tick.C {
+			msg := []byte(time.Now().String())
+			handler.Broadcast(msg)
+		}
+	}()
+
+	s, err := gev.NewServer(websocket.NewHandlerWrap(wsUpgrader, handler),
+		gev.CustomProtocol(websocket.New(wsUpgrader)),
+		gev.Network("tcp"),
+		gev.Address(conf.App.Addr),
+		gev.NumLoops(runtime.NumCPU()))
+	if err != nil {
+		base.ZapFatal("new server failed",
 			zap.Error(err),
 		)
 	}
+
+	s.Start()
 }
