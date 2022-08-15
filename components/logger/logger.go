@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -25,18 +26,40 @@ var (
 	})
 )
 
-func InitLogger(infoSyncer zapcore.WriteSyncer, errorSyncer zapcore.WriteSyncer, encoder zapcore.Encoder, zapOpts ...zap.Option) {
+func InitLoggerWithPath(level zapcore.Level, debugPath, infoPath, errorPath string, encoder zapcore.Encoder, zapOpts ...zap.Option) error {
+	debugFile, err := os.OpenFile(debugPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return err
+	}
+	infoFile, err := os.OpenFile(infoPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return err
+	}
+	errorFile, err := os.OpenFile(errorPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return err
+	}
+
+	InitLogger(level, debugFile, infoFile, errorFile, encoder, zapOpts...)
+
+	return nil
+}
+
+func InitLogger(level zapcore.Level, debugSyncer, infoSyncer, errorSyncer zapcore.WriteSyncer, encoder zapcore.Encoder, zapOpts ...zap.Option) {
 	once.Do(func() {
 		if encoder == nil {
 			encoder = defaultEncoder
 		}
 
 		core := zapcore.NewTee(
+			zapcore.NewCore(encoder, debugSyncer, zap.LevelEnablerFunc(func(z zapcore.Level) bool {
+				return z >= level && z >= zap.DebugLevel && z < zap.InfoLevel
+			})),
 			zapcore.NewCore(encoder, infoSyncer, zap.LevelEnablerFunc(func(z zapcore.Level) bool {
-				return z >= zap.InfoLevel && z <= zap.WarnLevel
+				return z >= level && z >= zap.InfoLevel && z < zap.WarnLevel
 			})),
 			zapcore.NewCore(encoder, errorSyncer, zap.LevelEnablerFunc(func(z zapcore.Level) bool {
-				return z >= zap.ErrorLevel
+				return z >= level && z >= zap.WarnLevel
 			})),
 		)
 		base.InitZapWithCore(core, zapOpts...)

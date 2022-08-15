@@ -2,7 +2,10 @@ package websocket
 
 import (
 	"net"
+	"strconv"
 	"sync"
+
+	"event/core/helper"
 )
 
 // ConnManager 连接池
@@ -26,6 +29,8 @@ func NewConnManager() ConnManager {
 				return newConnection()
 			},
 		},
+		guestConns: map[string]Connection{},
+		loginConns: map[int64]Connection{},
 	}
 }
 
@@ -48,6 +53,13 @@ func (cm *connManager) LoginOut(userId int64) {
 	defer cm.mutex.Unlock()
 
 	delete(cm.loginConns, userId)
+}
+
+func (cm *connManager) Register(guestId string, conn Connection) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	cm.guestConns[guestId] = conn
 }
 
 func (cm *connManager) Exit(guestId string) {
@@ -99,10 +111,29 @@ func (cm *connManager) ConnTotal() int {
 func (cm *connManager) AcquireConn(c net.Conn) Connection {
 	conn := cm.pool.Get().(*connection)
 	conn.conn = c
+
+	addr := c.RemoteAddr().String()
+	for index, b := range addr {
+		if b == ':' {
+			conn.remoteIp = addr[0:index]
+			port, _ := strconv.ParseUint(addr[index+1:], 10, 16)
+			conn.remotePort = uint16(port)
+			break
+		}
+	}
+
+	conn.id = helper.Id4Guest(conn.remoteIp)
+	cm.Register(conn.id, conn)
+
 	return conn
 }
 
 func (cm *connManager) ReleaseConn(conn Connection) {
+	id := conn.Id()
+	if id != "" {
+		cm.Exit(id)
+	}
+
 	conn.Reset()
 	cm.pool.Put(conn)
 }

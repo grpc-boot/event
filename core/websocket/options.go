@@ -18,10 +18,9 @@ var (
 )
 
 type Options struct {
-	gopool          *gopool.Pool
-	panicHandler    func(err interface{})
-	shutdownHandler func() error
-	connManager     ConnManager
+	gopool       *gopool.Pool
+	panicHandler func(err interface{})
+	connManager  ConnManager
 }
 
 type Option func(opts *Options)
@@ -41,13 +40,6 @@ func WithPanicHandler(panicHandler func(err interface{})) Option {
 	}
 }
 
-// WithShutdownHandler set shutdown handler
-func WithShutdownHandler(shutdownHandler func() error) Option {
-	return func(opts *Options) {
-		opts.shutdownHandler = shutdownHandler
-	}
-}
-
 // WithGopool set go pool
 func WithGopool(gp *gopool.Pool) Option {
 	return func(opts *Options) {
@@ -55,8 +47,8 @@ func WithGopool(gp *gopool.Pool) Option {
 	}
 }
 
-// WithConnPool set connection pool
-func WithConnPool(pool ConnManager) Option {
+// WithConnManager set connection manager
+func WithConnManager(pool ConnManager) Option {
 	return func(opts *Options) {
 		opts.connManager = pool
 	}

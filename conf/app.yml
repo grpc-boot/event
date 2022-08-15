@@ -1,0 +1,10 @@
+app:
+  addr: ':3333'
+  maxWorkers: 64
+  ioTimeoutMs: 300
+
+logger:
+  level: -1
+  debugPath: './log/debug.log'
+  infoPath: './log/info.log'
+  errorPath: './log/error.log'

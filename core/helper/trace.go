@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/grpc-boot/base"
 )
 
 const (
@@ -16,8 +18,13 @@ var (
 	maxLength    = len(paddingBytes)
 )
 
-func Id4Guest(clientIp uint32) string {
-	return idWithIp(clientIp, guest)
+func Id4Guest(ip string) string {
+	return idWithIpString(ip, guest)
+}
+
+func idWithIpString(ip string, app string) string {
+	ipVal, _ := base.Ip2Long(ip)
+	return idWithIp(ipVal, app)
 }
 
 func idWithIp(clientIp uint32, app string) string {

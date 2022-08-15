@@ -1,20 +1,26 @@
 package websocket
 
 import (
-	"fmt"
 	"net"
 	"runtime"
 	"time"
 
-	"event/core/chat"
-
 	"github.com/gobwas/ws"
+	"github.com/grpc-boot/base"
 	"github.com/grpc-boot/base/core/gopool"
 	"github.com/mailru/easygo/netpoll"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+)
+
+var (
+	tick = time.NewTicker(time.Second * 5)
 )
 
 type Server interface {
 	Serve(ln net.Listener) (err error)
+	OnStart(func(s Server) error)
+	OnShutDown(func() error)
 }
 
 type server struct {
@@ -23,6 +29,8 @@ type server struct {
 	options         *Options
 	acceptDesc      *netpoll.Desc
 	done            chan struct{}
+	hasDone         atomic.Bool
+	startHandler    func(s Server) error
 	shutdownHandler func() error
 	connManager     ConnManager
 }
@@ -52,15 +60,25 @@ func NewServer(opts ...Option) (Server, error) {
 	}
 
 	s := &server{
-		options:         options,
-		poller:          netPoller,
-		gopool:          options.gopool,
-		done:            make(chan struct{}, 1),
-		connManager:     options.connManager,
-		shutdownHandler: options.shutdownHandler,
+		options:     options,
+		poller:      netPoller,
+		gopool:      options.gopool,
+		done:        make(chan struct{}, 1),
+		connManager: options.connManager,
 	}
 
+	go s.tick()
+
 	return s, nil
+}
+
+func (s *server) tick() {
+	for range tick.C {
+		base.ZapInfo("info",
+			zap.Int("Total Conn", s.connManager.ConnTotal()),
+			zap.Int("Total Guest", s.connManager.GuestTotal()),
+		)
+	}
 }
 
 func (s *server) handle(c net.Conn) {
@@ -75,36 +93,53 @@ func (s *server) handle(c net.Conn) {
 	if err != nil {
 		_ = conn.Close()
 		s.connManager.ReleaseConn(conn)
+		base.ZapError("upgrade failed",
+			zap.Error(err),
+		)
 		return
 	}
 
-	fmt.Println(hs)
-
-	// Register incoming user in chat.
-	user := chat.Register(safeConn)
+	base.ZapInfo("upgrade success",
+		zap.String("Protocol", hs.Protocol),
+	)
 
 	desc, err := netpoll.HandleRead(c)
+	if err != nil {
+		base.ZapError("handler read failed",
+			zap.Error(err),
+		)
+	}
 
-	s.poller.Start(desc, func(ev netpoll.Event) {
+	err = s.poller.Start(desc, func(ev netpoll.Event) {
 		if ev&(netpoll.EventReadHup|netpoll.EventHup) != 0 {
-			// When ReadHup or Hup received, this mean that client has
-			// closed at least write end of the connection or connections
-			// itself. So we want to stop receive events about such conn
-			// and remove it from the chat registry.
-			s.poller.Stop(desc)
-			chat.Remove(user)
+			_ = s.poller.Stop(desc)
+			_ = conn.Close()
+			s.connManager.ReleaseConn(conn)
 			return
 		}
 
-		s.gopool.Submit(func() {
-			if err := user.Receive(); err != nil {
-				// When receive failed, we can only disconnect broken
-				// connection and stop to receive events about it.
-				poller.Stop(desc)
-				chat.Remove(user)
+		err = s.gopool.Submit(func() {
+			if err = conn.Receive(); err != nil {
+				_ = s.poller.Stop(desc)
+				_ = conn.Close()
+				s.connManager.ReleaseConn(conn)
+				base.ZapError("receive failed",
+					zap.Error(err),
+				)
 			}
 		})
+		if err != nil {
+			base.ZapError("submit receive failed",
+				zap.Error(err),
+			)
+		}
 	})
+
+	if err != nil {
+		base.ZapError("start poller for conn failed",
+			zap.Error(err),
+		)
+	}
 }
 
 func (s *server) Serve(ln net.Listener) (err error) {
@@ -117,6 +152,9 @@ func (s *server) Serve(ln net.Listener) (err error) {
 		err = s.gopool.Submit(func() {
 			conn, er := ln.Accept()
 			if er != nil {
+				base.ZapError("accept failed",
+					zap.Error(er),
+				)
 				return
 			}
 
@@ -124,22 +162,44 @@ func (s *server) Serve(ln net.Listener) (err error) {
 		})
 
 		if err != nil {
+			base.ZapError("submit event loop failed",
+				zap.Error(err),
+			)
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				delay := 5 * time.Millisecond
 				time.Sleep(delay)
 			}
 		}
 
-		err = s.poller.Resume(s.acceptDesc)
+		if err = s.poller.Resume(s.acceptDesc); err != nil {
+			base.ZapError("resume conn failed",
+				zap.Error(err),
+			)
+		}
 	})
 
 	if err != nil {
 		return err
 	}
 
+	if s.startHandler != nil {
+		if err = s.startHandler(s); err != nil {
+			return err
+		}
+	}
+
 	<-s.done
 
+	_ = s.shutdown()
 	return
+}
+
+func (s *server) OnStart(start func(s Server) error) {
+	s.startHandler = start
+}
+
+func (s *server) OnShutDown(shutdown func() error) {
+	s.shutdownHandler = shutdown
 }
 
 func (s *server) Shutdown() {
@@ -147,6 +207,10 @@ func (s *server) Shutdown() {
 }
 
 func (s *server) shutdown() error {
+	if !s.hasDone.CAS(false, true) {
+		return nil
+	}
+
 	err := s.poller.Stop(s.acceptDesc)
 
 	for {
