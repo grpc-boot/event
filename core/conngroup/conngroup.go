@@ -22,16 +22,16 @@ func NewConnGroup() *ConnGroup {
 	return cg
 }
 
-func (cg *ConnGroup) index(id int64) int64 {
-	return id & max
+func (cg *ConnGroup) index(id uint64) int {
+	return int(id & max)
 }
 
-func (cg *ConnGroup) Exists(id int64) bool {
+func (cg *ConnGroup) Exists(id uint64) bool {
 	index := cg.index(id)
 	return cg.shards[index].exists(id)
 }
 
-func (cg *ConnGroup) Set(id int64, value interface{}) (isCreate bool) {
+func (cg *ConnGroup) Set(id uint64, value interface{}) (isCreate bool) {
 	index := cg.index(id)
 	isCreate = cg.shards[index].set(id, value)
 	if isCreate {
@@ -40,12 +40,12 @@ func (cg *ConnGroup) Set(id int64, value interface{}) (isCreate bool) {
 	return
 }
 
-func (cg *ConnGroup) Get(id int64) (value interface{}, exists bool) {
+func (cg *ConnGroup) Get(id uint64) (value interface{}, exists bool) {
 	index := cg.index(id)
 	return cg.shards[index].get(id)
 }
 
-func (cg *ConnGroup) Delete(id int64) (delNum int) {
+func (cg *ConnGroup) Delete(id uint64) (delNum int) {
 	index := cg.index(id)
 	delNum = cg.shards[index].delete(id)
 	if delNum > 0 {

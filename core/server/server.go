@@ -1,10 +1,15 @@
 package server
 
 import (
-	"math/rand"
+	"context"
+	"errors"
+	"net/http"
+	_ "net/http/pprof"
 	"runtime"
+	"time"
 
 	"event/core/conngroup"
+	"event/core/zapkey"
 
 	"github.com/Allenxuxu/gev"
 	"github.com/Allenxuxu/gev/plugins/websocket"
@@ -12,14 +17,22 @@ import (
 	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
 	"github.com/grpc-boot/base"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
+type Handler interface {
+	ConnectHandle(conn *Conn) error
+	Handle(conn *Conn, data []byte) error
+	CloseHandle(conn *Conn) error
+}
+
 type Server struct {
-	nextConntionId atomic.Int64
-	connections    *conngroup.ConnGroup
-	broadcastCh    chan []byte
-	gev            *gev.Server
+	connections     *conngroup.ConnGroup
+	server          *gev.Server
+	pprofStatus     atomic.Bool
+	pprofServer     *http.Server
+	broadcastCh     chan []byte
+	shutdownHandler func(s *Server) error
+	handler         Handler
 }
 
 func NewServer() *Server {
@@ -29,7 +42,6 @@ func NewServer() *Server {
 	}
 
 	go server.broadcast()
-
 	return server
 }
 
@@ -47,12 +59,17 @@ func (s *Server) broadcast() {
 
 		s.connections.RangeValues(func(values []interface{}) {
 			defer func() {
-				_ = recover()
+				if er := recover(); er != nil {
+					base.ZapError("broadcast failed",
+						zapkey.Error(er.(error)),
+						zapkey.Event("broadcast"),
+					)
+				}
 			}()
 
-			for _, sess := range values {
-				if session, ok := sess.(*Session); ok && session.conn != nil {
-					_ = session.conn.Send(data)
+			for _, conn := range values {
+				if c, ok := conn.(*Conn); ok && c.Connection != nil {
+					_ = c.Send(data)
 				}
 			}
 		})
@@ -64,92 +81,120 @@ func (s *Server) Broadcast(msg []byte) {
 }
 
 func (s *Server) OnMessage(c *gev.Connection, data []byte) (messageType ws.MessageType, out []byte) {
-	base.ZapInfo("new msg",
-		zap.ByteString("Msg", data),
-	)
-	id, exists := getId(c)
+	id, exists := GetId(c)
 	if !exists {
+		if closeData, err := util.PackCloseData("not found id"); err == nil {
+			_ = c.Send(closeData)
+		}
 		return
 	}
 
-	sess, ok := s.connections.Get(id)
+	conn, ok := s.connections.Get(id)
+	if !ok {
+		if closeData, err := util.PackCloseData("not found conn"); err == nil {
+			_ = c.Send(closeData)
+		}
+		return
+	}
+
+	cn, ok := conn.(*Conn)
 	if !ok {
 		return
 	}
 
-	session, ok := sess.(*Session)
-	if !ok {
-		return
+	if cn.first {
+		cn.first = false
 	}
 
-	if session.first {
-		session.first = false
-	}
-
-	messageType = ws.MessageBinary
-	switch rand.Int() % 4 {
-	case 0:
-		out = data
-	case 1:
-		msg, err := util.PackData(ws.MessageText, data)
-		if err != nil {
-			panic(err)
-		}
-
-		if err = c.Send(msg); err != nil {
-			msg, err = util.PackCloseData(err.Error())
-			if err != nil {
-				panic(err)
-			}
-			if e := c.Send(msg); e != nil {
-				panic(e)
-			}
-		}
-	/*case 2:
-	msg, err := util.PackCloseData("close")
-	if err != nil {
-		panic(err)
-	}
-	if e := c.Send(msg); e != nil {
-		panic(e)
-	}*/
-	case 3:
-		go func() {
-			msg, err := util.PackData(ws.MessageText, []byte("async write data"))
-			if err != nil {
-				panic(err)
-			}
-			if e := c.Send(msg); e != nil {
-				panic(e)
-			}
-		}()
+	if err := s.handler.Handle(cn, data); err != nil {
+		base.ZapError("handler message failed",
+			zapkey.Error(err),
+			zapkey.Event("message"),
+		)
 	}
 	return
 }
 
 func (s *Server) OnConnect(c *gev.Connection) {
-	id := s.nextConntionId.Inc()
-	setId(c, id)
+	id, conn := newConn(c)
 
-	session := &Session{
-		first: true,
-		conn:  c,
+	if err := s.handler.ConnectHandle(conn); err != nil {
+		_ = conn.SendClose("connect failed")
+		return
 	}
 
-	s.connections.Set(id, session)
+	s.connections.Set(id, conn)
 }
 
 func (s *Server) OnClose(c *gev.Connection) {
-	id, exists := getId(c)
+	id, exists := GetId(c)
 	if !exists {
-		base.ZapError("not found")
+		base.ZapError("conn not found id",
+			zapkey.Event("close"),
+		)
 		return
 	}
+
+	if conn, ok := s.connections.Get(id); ok {
+		if cn, yes := conn.(*Conn); yes {
+			_ = s.handler.CloseHandle(cn)
+		}
+	}
+
 	s.connections.Delete(id)
 }
 
-func (s *Server) Shutdown() {
-	s.gev.Stop()
+func (s *Server) WithHandler(handler Handler) {
+	s.handler = handler
+}
+
+func (s *Server) WithShutdown(handler func(s *Server) error) {
+	s.shutdownHandler = handler
+}
+
+func (s *Server) Shutdown(timeout time.Duration) (err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	done := make(chan struct{}, 1)
+	go func() {
+		s.server.Stop()
+		if s.shutdownHandler != nil {
+			err = s.shutdownHandler(s)
+		}
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return errors.New("server: shutdown timeout")
+	case <-done:
+	}
+	return
+}
+
+func (s *Server) TotalConns() int64 {
+	return s.connections.Length()
+}
+
+func (s *Server) StartPprof(addr string, handler http.Handler) error {
+	if !s.pprofStatus.CAS(false, true) {
+		return nil
+	}
+
+	s.pprofServer = &http.Server{
+		Handler: handler,
+		Addr:    addr,
+	}
+
+	return s.pprofServer.ListenAndServe()
+}
+
+func (s *Server) StopPprof(ctx context.Context) error {
+	if !s.pprofStatus.CAS(true, false) {
+		return nil
+	}
+	return s.pprofServer.Shutdown(ctx)
 }
 
 func (s *Server) Serve(upgrader *ws.Upgrader, opts ...gev.Option) error {
@@ -166,9 +211,8 @@ func (s *Server) Serve(upgrader *ws.Upgrader, opts ...gev.Option) error {
 		return err
 	}
 
-	s.gev = ser
+	s.server = ser
 
-	s.gev.Start()
-
+	s.server.Start()
 	return nil
 }

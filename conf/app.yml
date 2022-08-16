@@ -1,7 +1,8 @@
 app:
   addr: ':3333'
-  maxWorkers: 64
-  ioTimeoutMs: 300
+  pprofAddr: ':3332'
+  numLoops: 4
+  maxIdleSeconds: 60
 
 logger:
   level: -1
