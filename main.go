@@ -76,23 +76,32 @@ func main() {
 		}
 	}()
 
-	go func() {
-		err = s.Serve(wsUpgrader,
-			gev.Network("tcp"),
-			gev.Address(conf.App.Addr),
-			gev.NumLoops(conf.App.NumLoops),
-			gev.IdleTime(time.Second*time.Duration(conf.App.MaxIdleSeconds)),
+	go handlerSignal(s, conf)
+	err = s.Serve(wsUpgrader,
+		gev.Network("tcp"),
+		gev.Address(conf.App.Addr),
+		gev.NumLoops(conf.App.NumLoops),
+		gev.IdleTime(time.Second*time.Duration(conf.App.MaxIdleSeconds)),
+	)
+	if err != nil {
+		base.ZapFatal("new server failed",
+			zapkey.Error(err),
 		)
+	}
+}
 
-		if err != nil {
-			base.ZapFatal("new server failed",
-				zapkey.Error(err),
+func handlerSignal(s *server.Server, conf *config.Config) {
+	defer func() {
+		if er := recover(); er != nil {
+			base.ZapError("recover msg",
+				zapkey.Error(er.(error)),
+				zapkey.Event("recover"),
 			)
 		}
-	}()
 
-	defer func() {
-		if err = s.Shutdown(time.Second * 10); err != nil {
+		base.ZapInfo("shutdown")
+
+		if err := s.Shutdown(time.Second * 10); err != nil {
 			base.ZapError("shutdown failed",
 				zapkey.Event("shutdown"),
 				zapkey.Error(err),
@@ -100,14 +109,18 @@ func main() {
 		}
 	}()
 
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGPROF)
+	signalCh := make(chan os.Signal)
+	signal.Notify(signalCh, syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		sig := <-signalCh
+		base.ZapInfo("signal",
+			zap.String("Signal", sig.String()),
+		)
+
 		switch sig {
 		case syscall.SIGUSR1:
 			base.Green("got user1")
-			if err = s.StartPprof(conf.App.PprofAddr, nil); err != nil {
+			if err := s.StartPprof(conf.App.PprofAddr, nil); err != nil {
 				base.ZapError("start pprof failed",
 					zapkey.Event("pprof start"),
 					zapkey.Error(err),
@@ -119,7 +132,7 @@ func main() {
 			func() {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()
-				if err = s.StopPprof(ctx); err != nil {
+				if err := s.StopPprof(ctx); err != nil {
 					base.ZapError("stop pprof failed",
 						zapkey.Event("pprof stop"),
 						zapkey.Error(err),
@@ -128,7 +141,7 @@ func main() {
 			}()
 			continue
 		default:
+			return
 		}
-		break
 	}
 }
