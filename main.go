@@ -77,10 +77,12 @@ func main() {
 	}()
 
 	go handlerSignal(s, conf)
+
 	err = s.Serve(wsUpgrader,
 		gev.Network("tcp"),
 		gev.Address(conf.App.Addr),
 		gev.NumLoops(conf.App.NumLoops),
+		gev.ReusePort(false),
 		gev.IdleTime(time.Second*time.Duration(conf.App.MaxIdleSeconds)),
 	)
 	if err != nil {
@@ -109,7 +111,7 @@ func handlerSignal(s *server.Server, conf *config.Config) {
 		}
 	}()
 
-	signalCh := make(chan os.Signal)
+	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM)
 	for {
 		sig := <-signalCh
@@ -119,17 +121,17 @@ func handlerSignal(s *server.Server, conf *config.Config) {
 
 		switch sig {
 		case syscall.SIGUSR1:
-			base.Green("got user1")
-			if err := s.StartPprof(conf.App.PprofAddr, nil); err != nil {
-				base.ZapError("start pprof failed",
-					zapkey.Event("pprof start"),
-					zapkey.Error(err),
-				)
-			}
+			go func() {
+				if err := s.StartPprof(conf.App.PprofAddr, nil); err != nil {
+					base.ZapError("start pprof failed",
+						zapkey.Event("pprof start"),
+						zapkey.Error(err),
+					)
+				}
+			}()
 			continue
 		case syscall.SIGUSR2:
-			base.Green("got user2")
-			func() {
+			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()
 				if err := s.StopPprof(ctx); err != nil {
