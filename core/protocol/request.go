@@ -1,18 +1,16 @@
 package protocol
 
 import (
-	"event/core/base"
-
-	jsoniter "github.com/json-iterator/go"
+	"github.com/grpc-boot/base"
 )
 
 type Request struct {
-	Id     string      `json:"id"`
-	Name   string      `json:"name"`
-	Params base.Params `json:"params"`
+	Id     string         `json:"id"`
+	Name   string         `json:"name"`
+	Params base.JsonParam `json:"params"`
 }
 
 func (r *Request) JsonMarshal() []byte {
-	data, _ := jsoniter.Marshal(r)
+	data, _ := base.JsonMarshal(r)
 	return data
 }

@@ -1,11 +1,12 @@
-app:
-  addr: ':3333'
-  pprofAddr: ':3332'
-  numLoops: 4
-  maxIdleSeconds: 60
-
+name: 'event'
+env: 'dev'
+ver: '1.0.0'
+addr: ':3333'
+pprofAddr: ':3332'
 logger:
   level: -1
-  debugPath: './log/debug.log'
-  infoPath: './log/info.log'
-  errorPath: './log/error.log'
+  path: './log'
+params:
+  numLoops: 4
+  maxIdleSeconds: 60
+  pageSize: 12

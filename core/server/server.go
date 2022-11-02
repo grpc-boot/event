@@ -3,20 +3,16 @@ package server
 import (
 	"context"
 	"errors"
-	"net/http"
-	_ "net/http/pprof"
 	"runtime"
 	"time"
 
 	"event/core/conngroup"
-	"event/core/zapkey"
-
 	"github.com/Allenxuxu/gev"
 	"github.com/Allenxuxu/gev/plugins/websocket"
 	"github.com/Allenxuxu/gev/plugins/websocket/ws"
 	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
 	"github.com/grpc-boot/base"
-	"go.uber.org/atomic"
+	"github.com/grpc-boot/base/core/zaplogger"
 )
 
 type Handler interface {
@@ -28,8 +24,6 @@ type Handler interface {
 type Server struct {
 	connections     *conngroup.ConnGroup
 	server          *gev.Server
-	pprofStatus     atomic.Bool
-	pprofServer     *http.Server
 	broadcastCh     chan []byte
 	shutdownHandler func(s *Server) error
 	handler         Handler
@@ -61,8 +55,8 @@ func (s *Server) broadcast() {
 			defer func() {
 				if er := recover(); er != nil {
 					base.ZapError("broadcast failed",
-						zapkey.Error(er.(error)),
-						zapkey.Event("broadcast"),
+						zaplogger.Error(er.(error)),
+						zaplogger.Event("broadcast"),
 					)
 				}
 			}()
@@ -108,8 +102,8 @@ func (s *Server) OnMessage(c *gev.Connection, data []byte) (messageType ws.Messa
 
 	if err := s.handler.Handle(cn, data); err != nil {
 		base.ZapError("handler message failed",
-			zapkey.Error(err),
-			zapkey.Event("message"),
+			zaplogger.Error(err),
+			zaplogger.Event("message"),
 		)
 	}
 	return
@@ -130,7 +124,7 @@ func (s *Server) OnClose(c *gev.Connection) {
 	id, exists := GetId(c)
 	if !exists {
 		base.ZapError("conn not found id",
-			zapkey.Event("close"),
+			zaplogger.Event("close"),
 		)
 		return
 	}
@@ -175,26 +169,6 @@ func (s *Server) Shutdown(timeout time.Duration) (err error) {
 
 func (s *Server) TotalConns() int64 {
 	return s.connections.Length()
-}
-
-func (s *Server) StartPprof(addr string, handler http.Handler) error {
-	if !s.pprofStatus.CAS(false, true) {
-		return nil
-	}
-
-	s.pprofServer = &http.Server{
-		Handler: handler,
-		Addr:    addr,
-	}
-
-	return s.pprofServer.ListenAndServe()
-}
-
-func (s *Server) StopPprof(ctx context.Context) error {
-	if !s.pprofStatus.CAS(true, false) {
-		return nil
-	}
-	return s.pprofServer.Shutdown(ctx)
 }
 
 func (s *Server) Serve(upgrader *ws.Upgrader, opts ...gev.Option) error {

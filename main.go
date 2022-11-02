@@ -8,33 +8,28 @@ import (
 	"syscall"
 	"time"
 
-	"event/components/config"
-	"event/components/container"
-	"event/components/logger"
 	"event/components/router"
-	"event/core/helper"
 	"event/core/server"
-	"event/core/zapkey"
-
 	"github.com/Allenxuxu/gev"
 	"github.com/Allenxuxu/gev/plugins/websocket/ws"
 	"github.com/grpc-boot/base"
+	"github.com/grpc-boot/base/core/zaplogger"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func init() {
-	var c = &config.Config{}
+	var c = &base.Config{}
 	err := base.YamlDecodeFile("./conf/app.yml", c)
 	if err != nil {
 		base.RedFatal("read conf file error:%s", err)
 	}
 
-	container.DefaultContainer.SetConfig(c.Format())
+	base.Green("run with config:%+v", *c)
+
+	base.DefaultContainer.SetConfig(c)
 
 	rand.Seed(time.Now().UnixNano())
-
-	err = logger.InitLoggerWithPath(zapcore.Level(c.Logger.Level), c.Logger.DebugPath, c.Logger.InfoPath, c.Logger.ErrorPath, nil)
+	err = base.InitZapWithOption(c.Logger)
 	if err != nil {
 		base.RedFatal("init logger error:%s", err)
 	}
@@ -45,21 +40,21 @@ func main() {
 		err error
 	)
 
-	conf := container.DefaultContainer.Config()
+	conf := base.DefaultContainer.Config()
 
 	wsUpgrader := &ws.Upgrader{}
 	wsUpgrader.OnHeader = func(c *gev.Connection, key, value []byte) error {
 		base.ZapInfo("header",
 			zap.ByteString("Key", key),
-			zapkey.Value(value),
+			zaplogger.Value(value),
 		)
 		return nil
 	}
 
 	wsUpgrader.OnRequest = func(c *gev.Connection, uri []byte) error {
 		base.ZapInfo("request",
-			zapkey.Uri(helper.Bytes2String(uri)),
-			zapkey.Event("OnRequest"),
+			zaplogger.Uri(base.Bytes2String(uri)),
+			zaplogger.Event("OnRequest"),
 		)
 		return nil
 	}
@@ -80,24 +75,24 @@ func main() {
 
 	err = s.Serve(wsUpgrader,
 		gev.Network("tcp"),
-		gev.Address(conf.App.Addr),
-		gev.NumLoops(conf.App.NumLoops),
+		gev.Address(conf.Addr),
+		gev.NumLoops(conf.Params.Int("numLoops")),
 		gev.ReusePort(false),
-		gev.IdleTime(time.Second*time.Duration(conf.App.MaxIdleSeconds)),
+		gev.IdleTime(time.Second*time.Duration(conf.Params.Int64("maxIdleSeconds"))),
 	)
 	if err != nil {
-		base.ZapFatal("new server failed",
-			zapkey.Error(err),
+		base.Fatal("new server failed",
+			zaplogger.Error(err),
 		)
 	}
 }
 
-func handlerSignal(s *server.Server, conf *config.Config) {
+func handlerSignal(s *server.Server, conf *base.Config) {
 	defer func() {
 		if er := recover(); er != nil {
 			base.ZapError("recover msg",
-				zapkey.Error(er.(error)),
-				zapkey.Event("recover"),
+				zaplogger.Error(er.(error)),
+				zaplogger.Event("recover"),
 			)
 		}
 
@@ -105,8 +100,8 @@ func handlerSignal(s *server.Server, conf *config.Config) {
 
 		if err := s.Shutdown(time.Second * 10); err != nil {
 			base.ZapError("shutdown failed",
-				zapkey.Event("shutdown"),
-				zapkey.Error(err),
+				zaplogger.Event("shutdown"),
+				zaplogger.Error(err),
 			)
 		}
 	}()
@@ -121,23 +116,31 @@ func handlerSignal(s *server.Server, conf *config.Config) {
 
 		switch sig {
 		case syscall.SIGUSR1:
+			if conf.PprofAddr == "" {
+				continue
+			}
+
 			go func() {
-				if err := s.StartPprof(conf.App.PprofAddr, nil); err != nil {
+				if err := base.StartPprof(conf.PprofAddr, nil); err != nil {
 					base.ZapError("start pprof failed",
-						zapkey.Event("pprof start"),
-						zapkey.Error(err),
+						zaplogger.Event("pprof start"),
+						zaplogger.Error(err),
 					)
 				}
 			}()
 			continue
 		case syscall.SIGUSR2:
+			if conf.PprofAddr == "" {
+				continue
+			}
+
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()
-				if err := s.StopPprof(ctx); err != nil {
+				if err := base.StopPprof(ctx); err != nil {
 					base.ZapError("stop pprof failed",
-						zapkey.Event("pprof stop"),
-						zapkey.Error(err),
+						zaplogger.Event("pprof stop"),
+						zaplogger.Error(err),
 					)
 				}
 			}()
