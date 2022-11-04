@@ -7,7 +7,7 @@
 <body>
 <script>
     let timer = null;
-    let ws = new WebSocket('ws://127.0.0.1:3333/ws');
+    let ws = new WebSocket('ws://127.0.0.1:3333/ws?l=1&k=1sdfaf3sadfaf23dfasdf');
     ws.onopen = function (ev) {
         console.log("ws open", ev);
     }

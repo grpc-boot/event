@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	Id = "ws:id"
+	Id       = "ws:id"
+	Protocol = "ws:protocol"
 )
 
 var (

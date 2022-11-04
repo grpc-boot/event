@@ -1,0 +1,18 @@
+{
+  "name": "event",
+  "env": "dev",
+  "ver": "1.0.0",
+  "addr": ":3333",
+  "pprofAddr": ":3332",
+  "logger":{
+    "level": -1,
+    "path": "./log"
+  },
+  "params":{
+    "numLoops": 4,
+    "maxIdleSeconds": 60,
+    "pageSize": 12,
+    "accept.level": 1,
+    "aes.key": "SD#$523asz7*&^df312c45cDvd$!F~12"
+  }
+}

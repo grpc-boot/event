@@ -4,7 +4,8 @@ go 1.17
 
 require (
 	github.com/Allenxuxu/gev v0.4.0
-	github.com/grpc-boot/base v1.2.6
+	github.com/gorilla/websocket v1.5.0
+	github.com/grpc-boot/base v1.2.9
 	go.uber.org/atomic v1.9.0
 	go.uber.org/zap v1.20.0
 )

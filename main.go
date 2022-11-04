@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
-	"math/rand"
+	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"event/components"
 	"event/components/router"
 	"event/core/server"
+	"event/lib/constant"
+
 	"github.com/Allenxuxu/gev"
 	"github.com/Allenxuxu/gev/plugins/websocket/ws"
 	"github.com/grpc-boot/base"
@@ -19,7 +24,7 @@ import (
 
 func init() {
 	var c = &base.Config{}
-	err := base.YamlDecodeFile("./conf/app.yml", c)
+	err := base.JsonDecodeFile("./conf/app.json", c)
 	if err != nil {
 		base.RedFatal("read conf file error:%s", err)
 	}
@@ -28,11 +33,12 @@ func init() {
 
 	base.DefaultContainer.SetConfig(c)
 
-	rand.Seed(time.Now().UnixNano())
 	err = base.InitZapWithOption(c.Logger)
 	if err != nil {
 		base.RedFatal("init logger error:%s", err)
 	}
+
+	components.Bootstrap()
 }
 
 func main() {
@@ -40,22 +46,63 @@ func main() {
 		err error
 	)
 
-	conf := base.DefaultContainer.Config()
+	var (
+		conf      = base.DefaultContainer.Config()
+		accept, _ = base.DefaultContainer.Get(constant.Accept)
+	)
 
 	wsUpgrader := &ws.Upgrader{}
-	wsUpgrader.OnHeader = func(c *gev.Connection, key, value []byte) error {
-		base.ZapInfo("header",
-			zap.ByteString("Key", key),
-			zaplogger.Value(value),
-		)
-		return nil
-	}
-
 	wsUpgrader.OnRequest = func(c *gev.Connection, uri []byte) error {
-		base.ZapInfo("request",
-			zaplogger.Uri(base.Bytes2String(uri)),
-			zaplogger.Event("OnRequest"),
-		)
+		urlInfo, err := url.ParseRequestURI(base.Bytes2String(uri))
+		if err != nil {
+			return ws.ErrHandshakeBadUpgrade
+		}
+
+		l, _ := strconv.Atoi(urlInfo.Query().Get("l"))
+		key := urlInfo.Query().Get("k")
+		level := uint8(l)
+
+		base.Green("level:%d", level)
+
+		protocol, err := accept.(*base.Accept).AcceptHex(level, []byte(key))
+		if err != nil {
+			return ws.ErrHandshakeBadUpgrade
+		}
+
+		if level > base.LevelV1 {
+			pkg := &base.Package{
+				Id:   base.ConnectSuccess,
+				Name: "connect success",
+				Param: base.JsonParam{
+					"data": nil,
+				},
+			}
+
+			k := protocol.ResponseKey()
+			if len(k) > 0 {
+				pkg.Param["data"] = k
+			}
+
+			text := pkg.Pack()
+			msg, err := util.PackData(ws.MessageText, text)
+			if err != nil {
+				base.ZapError("pack text msg failed",
+					zaplogger.Error(err),
+					zaplogger.Value(text),
+				)
+				return ws.ErrHandshakeBadUpgrade
+			}
+
+			if err = c.Send(msg); err != nil {
+				base.ZapError("send connect success failed",
+					zaplogger.Error(err),
+					zaplogger.Value(text),
+				)
+				return ws.ErrHandshakeBadUpgrade
+			}
+		}
+
+		c.Set(server.Protocol, protocol)
 		return nil
 	}
 
