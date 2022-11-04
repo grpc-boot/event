@@ -5,7 +5,11 @@
     <title>websocket</title>
 </head>
 <body>
+<script src="protocol.js"></script>
 <script>
+    console.log("helloasdf23@#Efddsfdsf23sDGsdg", crc32("helloasdf23@#Efddsfdsf23sDGsdg"));
+    console.log("worasdfLKNSDVLKNSDC*f3oadfasfld", crc32("worasdfLKNSDVLKNSDC*f3oadfasfld"));
+    
     let timer = null;
     let ws = new WebSocket('ws://127.0.0.1:3333/ws?l=1&k=1sdfaf3sadfaf23dfasdf');
     ws.onopen = function (ev) {
