@@ -10,12 +10,14 @@
 <script>
 
     window.onload = function () {
-        let data = crypt("Hello");
+        let data = encrypt("Hello");
         let a = 1;
         console.log(String.fromCharCode.apply(String, [104,101,108,108,111,32,119,111,114,108,100]));
-        let pt =new Package(1, '22', '222');
-        let protocol = new V1('f3asfsadfasdffasdfsadf2323sfasfd');
-        protocol.pack(pt);
+        let pt =new Package(0x1000, '22', '222');
+        let protocol = new V1(randKey() + randKey());
+        let pkgData = protocol.pack(pt);
+        console.log(pkgData);
+        console.log(protocol.unpack(pkgData));
         console.log(data.toString(), data);
     }
 
@@ -37,12 +39,6 @@
     ws.onerror = function (ev) {
         console.log(ev)
     }
-
-    let num = 1;
-    timer = setInterval(function () {
-        num++;
-        ws.send(JSON.stringify({id: num, name: "heart check", params:{"dd":"params"}}));
-    }, 1000);
 </script>
 </body>
 </html>

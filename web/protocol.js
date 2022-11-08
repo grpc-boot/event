@@ -1,4 +1,4 @@
-function crypt(msg, k, v) {
+function encrypt(msg, k, v) {
     k = !k ? "SD#$523asz7*&^df" : k;
     v = !v ? "312c45cDvd$!F~12" : v;
 
@@ -7,6 +7,21 @@ function crypt(msg, k, v) {
             iv: CryptoJS.enc.Utf8.parse(v)
         }
     );
+}
+
+function decrypt(base64Data, k, v) {
+    k = !k ? "SD#$523asz7*&^df" : k;
+    v = !v ? "312c45cDvd$!F~12" : v;
+
+    return CryptoJS.AES.decrypt(base64Data,
+        CryptoJS.enc.Utf8.parse(k), {
+            iv: CryptoJS.enc.Utf8.parse(v)
+        }
+    );
+}
+
+function randKey() {
+    return Math.ceil(0x1000000000000000 + Math.random() * 0xf000000000000000).toString(16);
 }
 
 function int2HexWithPad(val, len) {
@@ -22,17 +37,14 @@ function int2HexWithPad(val, len) {
     return data;
 }
 
-function bytes2String(bytes) {
-    return String.fromCharCode.apply(String, bytes)
-}
-
-function packInt(val) {
-    let targets =[];
-    targets[0] = val & 0xFF;
-    targets[1] = val >> 8 & 0xFF;
-    targets[2] = val >> 16 & 0xFF;
-    targets[3] = val >> 24 & 0xFF;
-    return targets;
+function intToBytesBigEndian(number, length){
+    var bytes = [];
+    var i = length;
+    do {
+        bytes[--i] = number & (255);
+        number = number>>8;
+    } while (i)
+    return bytes;
 }
 
 function Package(id, name) {
@@ -94,15 +106,40 @@ function V1(k) {
 }
 
 V1.prototype.pack = function (pkg) {
-    let data = crypt(pkg.pack(), this.k.substring(0, 16), this.k.substring(16, 32));
-    let sign = CryptoJS.MD5(data.ciphertext.words);
-    let signVal = parseInt(sign.toString().substring(0, 8), 16);
-    let bytes = bytes2String([1, 58])
+    let data = encrypt(pkg.pack(), this.k.substring(0, 16), this.k.substring(16, 32)).toString();
+    let signVal = parseInt(CryptoJS.MD5(data).toString().substring(0, 8), 16);
+    let bytes = String.fromCharCode.apply(String, [1, 58])
         + int2HexWithPad(pkg.id, 4)
-        + bytes2String([0])
-        + bytes2String(packInt(signVal))
-        + bytes2String(data.ciphertext.words);
+        + String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))
+        + data;
     return bytes;
+}
+
+V1.prototype.unpack = function (data) {
+    if (!data || data.length < 11 || data[0] !== String.fromCharCode(1) || data[1] !== ':'){
+        return false;
+    }
+
+    let id = parseInt(data.substring(2, 6), 16);
+    if(id < 1 || id > 0xffff) {
+        return false;
+    }
+
+    let signVal = parseInt(CryptoJS.MD5(data.substring(10)).toString().substring(0, 8), 16);
+    if(data.substring(6, 10) !== String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))) {
+        return false;
+    }
+
+    let res = decrypt(data.substring(10), this.k.substring(0, 16), this.k.substring(16, 32));
+    let dataStr = res.toString(CryptoJS.enc.Utf8);
+    let pkg = new Package();
+    if(pkg.unpack(dataStr)) {
+        if(pkg.id !== id) {
+            return false;
+        }
+        return pkg;
+    }
+    return false;
 }
 
 function V2(k) {
