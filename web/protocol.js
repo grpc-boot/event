@@ -77,12 +77,13 @@ Package.prototype.unpack = function (data) {
 }
 
 function WsProtocol(uri, level, k, v) {
-    this.uri   = uri;
-    this.level = level;
-    this.k     = k;
-    this.v     = v;
-    this.ws    = null;
+    this.uri      = uri;
+    this.level    = level;
+    this.k        = k;
+    this.v        = v;
+    this.ws       = null;
     this.protocol = null;
+    this.events   = {};
 }
 
 WsProtocol.prototype.buildUri = function () {
@@ -115,19 +116,66 @@ WsProtocol.prototype.buildUri = function () {
     return url;
 }
 
+WsProtocol.prototype.trigger = function (eventName, data) {
+    if(!(this.events[ eventName ])) {
+        return;
+    }
+
+    for(let i=0; i<this.events[eventName]; i++) {
+        setTimeout(function (){
+            self.events[eventName][i](data);
+        }, 0);
+    }
+}
+
 WsProtocol.prototype.dial = function () {
     let url = this.buildUri();
-    console.log(url);
     try {
         this.ws = new WebSocket(url);
-        return true;
     } catch (e) {
         return false;
     }
+
+    let self = this;
+    this.ws.onmessage = function (msg) {
+        var reader = new FileReader();
+        reader.readAsText(msg.data, 'utf-8');
+        let pkg = self.protocol.unpack(reader.result);
+        if(!pkg) {
+            console.log(msg);
+            return;
+        }
+
+        self.trigger(pkg.name, pkg);
+    };
+
+    this.ws.onclose = function(ev) {
+        console.log('connection close');
+        self.trigger("close", ev);
+    }
+
+    this.ws.onopen = function (ev) {
+        console.log('connect success');
+        self.trigger('open', ev);
+    }
+
+    this.ws.onerror = function (ev) {
+        console.log('error', ev);
+        self.trigger('error', ev);
+    }
+
+    return true;
 }
 
 WsProtocol.prototype.accept = function () {
 
+}
+
+WsProtocol.prototype.on = function(eventName, handler) {
+    if(!this.events[eventName]) {
+        this.events[eventName] = [];
+    }
+    this.events[eventName].push(handler);
 }
 
 function Json() {

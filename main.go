@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
 	"net/url"
 	"os"
 	"os/signal"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/Allenxuxu/gev"
 	"github.com/Allenxuxu/gev/plugins/websocket/ws"
+	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
 	"github.com/grpc-boot/base"
 	"github.com/grpc-boot/base/core/zaplogger"
 	"go.uber.org/zap"
@@ -113,7 +113,14 @@ func main() {
 	go func() {
 		tick := time.NewTicker(time.Second)
 		for range tick.C {
-			msg := []byte(time.Now().String())
+			msg := &base.Package{
+				Id:   base.Tick,
+				Name: "tick",
+				Param: base.JsonParam{
+					"current": time.Now().String(),
+				},
+			}
+
 			s.Broadcast(msg)
 		}
 	}()

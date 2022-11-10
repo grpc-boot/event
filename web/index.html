@@ -17,22 +17,9 @@
             return;
         }
 
-        proto.ws.onopen = function (ev) {
-            console.log("ws open", ev);
-        }
-
-        proto.ws.onmessage = function (me) {
-            console.log("ws msg", me);
-        }
-
-        proto.ws.onclose = function (ev) {
-            clearInterval(timer)
-            console.log("close")
-        }
-
-        proto.ws.onerror = function (ev) {
-            console.log(ev)
-        }
+        proto.on('tick', function (pkg){
+            console.log(pkg);
+        });
     }
 </script>
 </body>

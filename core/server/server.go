@@ -25,7 +25,7 @@ type Handler interface {
 type Server struct {
 	connections     *conngroup.ConnGroup
 	server          *gev.Server
-	broadcastCh     chan []byte
+	broadcastCh     chan *base.Package
 	shutdownHandler func(s *Server) error
 	handler         Handler
 }
@@ -33,7 +33,7 @@ type Server struct {
 func NewServer() *Server {
 	server := &Server{
 		connections: conngroup.NewConnGroup(),
-		broadcastCh: make(chan []byte, 1024),
+		broadcastCh: make(chan *base.Package, 1024),
 	}
 
 	go server.broadcast()
@@ -45,11 +45,6 @@ func (s *Server) broadcast() {
 		msg, ok := <-s.broadcastCh
 		if !ok {
 			break
-		}
-
-		data, err := util.PackData(ws.MessageText, msg)
-		if err != nil {
-			continue
 		}
 
 		s.connections.RangeValues(func(values []interface{}) {
@@ -64,14 +59,14 @@ func (s *Server) broadcast() {
 
 			for _, conn := range values {
 				if c, ok := conn.(*Conn); ok && c.Connection != nil {
-					_ = c.Send(data)
+					_ = c.SendPackage(msg)
 				}
 			}
 		})
 	}
 }
 
-func (s *Server) Broadcast(msg []byte) {
+func (s *Server) Broadcast(msg *base.Package) {
 	s.broadcastCh <- msg
 }
 

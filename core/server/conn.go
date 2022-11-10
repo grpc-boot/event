@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Allenxuxu/gev"
@@ -8,6 +9,10 @@ import (
 	"github.com/Allenxuxu/gev/plugins/websocket/ws/util"
 	"github.com/grpc-boot/base"
 	"github.com/grpc-boot/base/core/zaplogger"
+)
+
+var (
+	ErrProtocolNotExists = errors.New("protocol not exists")
 )
 
 type Conn struct {
@@ -29,6 +34,16 @@ func newConn(conn *gev.Connection) (id uint64, c *Conn) {
 
 func (c *Conn) GetId() (id uint64, exists bool) {
 	return GetId(c.Connection)
+}
+
+func (c *Conn) SendPackage(pkg *base.Package) error {
+	proto, exists := c.Get(Protocol)
+	if !exists {
+		return ErrProtocolNotExists
+	}
+
+	data := proto.(base.Protocol).Pack(pkg)
+	return c.SendBinary(data)
 }
 
 func (c *Conn) SendText(text []byte) error {
