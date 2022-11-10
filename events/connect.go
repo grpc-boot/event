@@ -1,7 +1,13 @@
 package events
 
-import "event/core/server"
+import (
+	"event/core/server"
 
-func Connect(conn *server.Conn) {
+	"github.com/grpc-boot/base"
+)
 
+func Connect(conn *server.Conn, pkg *base.Package) error {
+	base.Green("connect success")
+
+	return nil
 }

@@ -12,7 +12,22 @@
     window.onload = function () {
         proto = new WsProtocol('ws://127.0.0.1:3333/ws', LevelV2, 'SD3c523asz7*&^df', '312c45cDvd4bFc12');
         proto.dial();
-        proto.on(EventTick, function (pkg){
+        proto.on(EventMessage, function (pkg){
+            console.log(pkg);
+            pkg.param.randKey += randKey();
+            proto.emit(pkg);
+        });
+
+        proto.on(EventConnectSuccess, function (pkg) {
+            pkg = new Package(EventMessage, "message");
+            pkg.param = {
+                current: (new Date()).getUTCDate(),
+                randKey: randKey()
+            };
+
+            for(let i=0;i < 1024;i++) {
+                pkg.param.randKey += randKey();
+            }
             proto.emit(pkg);
         });
     }

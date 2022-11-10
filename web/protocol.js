@@ -14,6 +14,8 @@ const EventLogin               = 0x0200;
 const EventLoginSuccess        = 0x0201;
 const EventLoginFailed         = 0x0202;
 
+const EventMessage = 0x0300;
+
 function encrypt(msg, k, v) {
     return CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(msg),
         CryptoJS.enc.Utf8.parse(k), {

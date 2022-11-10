@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"event/events"
 	"net/url"
 	"os"
 	"os/signal"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"event/components"
-	"event/components/router"
 	"event/core/server"
 	"event/lib/constant"
 
@@ -71,7 +71,7 @@ func main() {
 
 		if level > base.LevelV1 {
 			pkg := &base.Package{
-				Id:   base.ConnectSuccess,
+				Id:   base.EventConnectSuccess,
 				Name: "connect success",
 				Param: base.JsonParam{
 					"data": nil,
@@ -107,23 +107,7 @@ func main() {
 	}
 
 	s := server.NewServer()
-	r := router.NewRouter()
-	s.WithHandler(r)
-
-	go func() {
-		tick := time.NewTicker(time.Second)
-		for range tick.C {
-			msg := &base.Package{
-				Id:   base.Tick,
-				Name: "tick",
-				Param: base.JsonParam{
-					"current": time.Now().String(),
-				},
-			}
-
-			s.Broadcast(msg)
-		}
-	}()
+	s.WithHandler(events.LoadRouter())
 
 	go handlerSignal(s, conf)
 

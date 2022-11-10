@@ -36,7 +36,16 @@ func (c *Conn) GetId() (id uint64, exists bool) {
 	return GetId(c.Connection)
 }
 
-func (c *Conn) SendPackage(pkg *base.Package) error {
+func (c *Conn) Unpack(data []byte) (pkg *base.Package, err error) {
+	proto, exists := c.Get(Protocol)
+	if !exists {
+		return nil, ErrProtocolNotExists
+	}
+
+	return proto.(base.Protocol).Unpack(data)
+}
+
+func (c *Conn) Emit(pkg *base.Package) error {
 	proto, exists := c.Get(Protocol)
 	if !exists {
 		return ErrProtocolNotExists

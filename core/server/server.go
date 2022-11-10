@@ -59,7 +59,7 @@ func (s *Server) broadcast() {
 
 			for _, conn := range values {
 				if c, ok := conn.(*Conn); ok && c.Connection != nil {
-					_ = c.SendPackage(msg)
+					_ = c.Emit(msg)
 				}
 			}
 		})
