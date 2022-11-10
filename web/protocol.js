@@ -1,6 +1,18 @@
 const LevelJson = 0;
+const LevelV0   = LevelJson;
 const LevelV1   = 1;
 const LevelV2   = 2;
+
+//协议相关
+const EventConnectSuccess = 0x0100;
+const EventTick           = 0x0101;
+const EventClose          = 0x0102;
+const EventError          = 0x0103;
+
+// 登录相关
+const EventLogin               = 0x0200;
+const EventLoginSuccess        = 0x0201;
+const EventLoginFailed         = 0x0202;
 
 function encrypt(msg, k, v) {
     return CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(msg),
@@ -35,24 +47,14 @@ function int2HexWithPad(val, len) {
     return data;
 }
 
-function intToBytesBigEndian(number, length){
-    var bytes = [];
-    var i = length;
-    do {
-        bytes[--i] = number & (255);
-        number = number>>8;
-    } while (i)
-    return bytes;
-}
-
 function Package(id, name) {
     this.id   = id;
     this.name = name;
-    this.data = {};
+    this.param = {};
 }
 
-Package.prototype.setData = function(data) {
-    this.data = data;
+Package.prototype.setParam = function(param) {
+    this.param = param;
 }
 
 Package.prototype.pack = function() {
@@ -71,7 +73,7 @@ Package.prototype.unpack = function (data) {
 
     this.id   = obj['id'];
     this.name = obj['name'];
-    this.data = obj['data'];
+    this.param = obj['param'];
 
     return true;
 }
@@ -84,6 +86,27 @@ function WsProtocol(uri, level, k, v) {
     this.ws       = null;
     this.protocol = null;
     this.events   = {};
+    this.retryInterval   = 5000;
+    this.timer           = null;
+}
+
+WsProtocol.prototype.resetRetryInterval = function (interval) {
+    this.retryInterval = interval;
+    this.retry();
+}
+
+WsProtocol.prototype.retry = function() {
+    let self = this;
+    clearInterval(this.timer);
+    setInterval(function (){
+        if(self.ws && self.ws.readyState < WebSocket.CLOSING) {
+            return;
+        }
+
+        if(!self.dial()) {
+            console.log('connect failed');
+        }
+    }, this.retryInterval);
 }
 
 WsProtocol.prototype.buildUri = function () {
@@ -108,7 +131,7 @@ WsProtocol.prototype.buildUri = function () {
             url+= ('&k='+encrypt(key, this.k, this.v).ciphertext.toString());
             break;
         case LevelV2:
-            this.protocol = new V2(key);
+            this.protocol = new V2(key, this.k + this.v);
             url+= ('&k='+encrypt(key, this.k, this.v).ciphertext.toString());
             break;
     }
@@ -116,14 +139,16 @@ WsProtocol.prototype.buildUri = function () {
     return url;
 }
 
-WsProtocol.prototype.trigger = function (eventName, data) {
-    if(!(this.events[ eventName ])) {
+WsProtocol.prototype.trigger = function (eventId, data) {
+    if(!(this.events[ eventId ])) {
         return;
     }
 
-    for(let i=0; i<this.events[eventName]; i++) {
+    let self = this;
+
+    for(let i=0; i<this.events[eventId].length; i++) {
         setTimeout(function (){
-            self.events[eventName][i](data);
+            self.events[eventId][i](data);
         }, 0);
     }
 }
@@ -136,32 +161,31 @@ WsProtocol.prototype.dial = function () {
         return false;
     }
 
+    this.retry();
+
     let self = this;
-    this.ws.onmessage = function (msg) {
-        var reader = new FileReader();
-        reader.readAsText(msg.data, 'utf-8');
-        let pkg = self.protocol.unpack(reader.result);
+    this.ws.onmessage = function (event) {
+        let pkg = self.protocol.unpack(event.data);
         if(!pkg) {
-            console.log(msg);
+            console.log('unpack failed', event);
             return;
         }
-
-        self.trigger(pkg.name, pkg);
+        self.trigger(pkg.id, pkg);
     };
 
-    this.ws.onclose = function(ev) {
-        console.log('connection close');
-        self.trigger("close", ev);
+    this.ws.onclose = function(event) {
+        console.log('connection close', event);
+        self.trigger(EventClose, event);
     }
 
-    this.ws.onopen = function (ev) {
-        console.log('connect success');
-        self.trigger('open', ev);
+    this.ws.onopen = function (event) {
+        console.log('connect success', event);
+        self.trigger(EventConnectSuccess, event);
     }
 
-    this.ws.onerror = function (ev) {
-        console.log('error', ev);
-        self.trigger('error', ev);
+    this.ws.onerror = function (event) {
+        console.log('error', event);
+        self.trigger(EventError, event);
     }
 
     return true;
@@ -197,34 +221,31 @@ Json.prototype.unpack = function (data) {
 function V1(k) {
     this.k     = k;
     this.level = 1;
+    this.headerLength = 16;
+    this.startTag  = '013a';
 }
 
 V1.prototype.pack = function (pkg) {
     let data = encrypt(pkg.pack(), this.k.substring(0, 16), this.k.substring(16, 32)).toString();
-    let signVal = parseInt(CryptoJS.MD5(data).toString().substring(0, 8), 16);
-    let bytes = String.fromCharCode.apply(String, [1, 58])
-        + int2HexWithPad(pkg.id, 4)
-        + String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))
-        + data;
-    return bytes;
+    return this.startTag + int2HexWithPad(pkg.id, 4) + int2HexWithPad(data.length, 8) + data;
 }
 
 V1.prototype.unpack = function (data) {
-    if (!data || data.length < 11 || data[0] !== String.fromCharCode(1) || data[1] !== ':'){
+    if (!data || data.length < this.headerLength + 1 || data.substring(0, 4) !== this.startTag){
         return false;
     }
 
-    let id = parseInt(data.substring(2, 6), 16);
+    let id = parseInt(data.substring(4, 8), 16);
     if(id < 1 || id > 0xffff) {
         return false;
     }
 
-    let signVal = parseInt(CryptoJS.MD5(data.substring(10)).toString().substring(0, 8), 16);
-    if(data.substring(6, 10) !== String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))) {
+    let bodyLength = parseInt(data.substring(8, this.headerLength), 16);
+    if(bodyLength + this.headerLength !== data.length) {
         return false;
     }
 
-    let res = decrypt(data.substring(10), this.k.substring(0, 16), this.k.substring(16, 32));
+    let res = decrypt(data.substring(this.headerLength), this.k.substring(0, 16), this.k.substring(16, 32));
     let dataStr = res.toString(CryptoJS.enc.Utf8);
     let pkg = new Package();
     if(pkg.unpack(dataStr)) {
@@ -236,41 +257,51 @@ V1.prototype.unpack = function (data) {
     return false;
 }
 
-function V2(k) {
+function V2(k, key) {
+    this.key   = key;
     this.k     = k;
     this.level = 2;
-}
-
-V2.prototype.setV = function(v) {
-    this.v = v;
+    this.headerLength = 16;
+    this.startTag  = '023a';
+    this.v     = '';
 }
 
 V2.prototype.pack = function (pkg) {
     let data = encrypt(pkg.pack(), this.k, this.v).toString();
-    let signVal = parseInt(CryptoJS.MD5(data).toString().substring(0, 8), 16);
-    let bytes = String.fromCharCode.apply(String, [1, 58])
-        + int2HexWithPad(pkg.id, 4)
-        + String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))
-        + data;
-    return bytes;
+    return this.startTag + int2HexWithPad(pkg.id, 4)+ int2HexWithPad(data.length, 8) + data;
 }
 
 V2.prototype.unpack = function (data) {
-    if (!data || data.length < 11 || data[0] !== String.fromCharCode(1) || data[1] !== ':'){
+    if (!data || data.length < this.headerLength + 1) {
         return false;
     }
 
-    let id = parseInt(data.substring(2, 6), 16);
+    if (data.substring(0, 4) !== this.startTag) {
+        if(this.v.length < 1 && data.substring(0, 1) === '{') {
+            let pkg = new Package();
+            if(pkg.unpack(data)) {
+                if(pkg.id === EventConnectSuccess && pkg.param['data']) {
+                    let v = decrypt(pkg.param['data'], this.key.substring(0, 16), this.key.substring(16));
+                    this.v = v.toString(CryptoJS.enc.Utf8);
+                }
+
+                return pkg;
+            }
+        }
+        return false;
+    }
+
+    let id = parseInt(data.substring(4, 8), 16);
     if(id < 1 || id > 0xffff) {
         return false;
     }
 
-    let signVal = parseInt(CryptoJS.MD5(data.substring(10)).toString().substring(0, 8), 16);
-    if(data.substring(6, 10) !== String.fromCharCode.apply(String, intToBytesBigEndian(signVal, 4))) {
+    let bodyLength = parseInt(data.substring(8, this.headerLength), 16);
+    if(bodyLength + this.headerLength !== data.length) {
         return false;
     }
 
-    let res = decrypt(data.substring(10), this.k, this.v);
+    let res = decrypt(data.substring(this.headerLength), this.k, this.v);
     let dataStr = res.toString(CryptoJS.enc.Utf8);
     let pkg = new Package();
     if(pkg.unpack(dataStr)) {

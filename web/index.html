@@ -11,13 +11,13 @@
     let proto = null;
     let timer = null;
     window.onload = function () {
-        proto = new WsProtocol('ws://127.0.0.1:3333/ws', LevelV1, 'SD3c523asz7*&^df', '312c45cDvd4bFc12');
+        proto = new WsProtocol('ws://127.0.0.1:3333/ws', LevelV2, 'SD3c523asz7*&^df', '312c45cDvd4bFc12');
         if(!proto.dial()) {
             console.log('connect failed');
             return;
-        }
+        };
 
-        proto.on('tick', function (pkg){
+        proto.on(EventTick, function (pkg){
             console.log(pkg);
         });
     }

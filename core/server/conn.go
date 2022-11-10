@@ -43,7 +43,7 @@ func (c *Conn) SendPackage(pkg *base.Package) error {
 	}
 
 	data := proto.(base.Protocol).Pack(pkg)
-	return c.SendBinary(data)
+	return c.SendText(data)
 }
 
 func (c *Conn) SendText(text []byte) error {
