@@ -98,7 +98,7 @@ WsProtocol.prototype.resetRetryInterval = function (interval) {
 WsProtocol.prototype.retry = function() {
     let self = this;
     clearInterval(this.timer);
-    setInterval(function (){
+    this.timer = setInterval(function (){
         if(self.ws && self.ws.readyState < WebSocket.CLOSING) {
             return;
         }
@@ -107,6 +107,15 @@ WsProtocol.prototype.retry = function() {
             console.log('connect failed');
         }
     }, this.retryInterval);
+}
+
+WsProtocol.prototype.emit = function (pkg) {
+    try {
+        let msg = this.protocol.pack(pkg);
+        this.ws.send(msg);
+    }catch (e) {
+        console.log(e);
+    }
 }
 
 WsProtocol.prototype.buildUri = function () {
@@ -155,15 +164,10 @@ WsProtocol.prototype.trigger = function (eventId, data) {
 
 WsProtocol.prototype.dial = function () {
     let url = this.buildUri();
-    try {
-        this.ws = new WebSocket(url);
-    } catch (e) {
-        return false;
-    }
-
-    this.retry();
-
     let self = this;
+
+    this.ws = new WebSocket(url);
+
     this.ws.onmessage = function (event) {
         let pkg = self.protocol.unpack(event.data);
         if(!pkg) {
@@ -188,11 +192,9 @@ WsProtocol.prototype.dial = function () {
         self.trigger(EventError, event);
     }
 
+    this.retry();
+
     return true;
-}
-
-WsProtocol.prototype.accept = function () {
-
 }
 
 WsProtocol.prototype.on = function(eventName, handler) {
