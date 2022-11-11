@@ -3,7 +3,6 @@ package router
 import (
 	"event/core/server"
 	"event/core/zapkey"
-
 	"github.com/grpc-boot/base"
 	"github.com/grpc-boot/base/core/zaplogger"
 )
@@ -65,6 +64,10 @@ func (r *Route) Handle(conn *server.Conn, data []byte) error {
 		zaplogger.Data(data),
 		zaplogger.Event("message"),
 	)
+
+	if base.Bytes2String(data) == "ping" {
+		return conn.SendText([]byte("pong"))
+	}
 
 	pkg, err := conn.Unpack(data)
 	if err != nil {

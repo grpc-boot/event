@@ -12,7 +12,7 @@
     "numLoops": 4,
     "maxIdleSeconds": 60,
     "pageSize": 12,
-    "accept.level": 1,
+    "accept.level": 0,
     "aes.key": "SD3c523asz7*&^df312c45cDvd4bFc12"
   }
 }

@@ -88,36 +88,7 @@ function WsProtocol(uri, level, k, v) {
     this.ws       = null;
     this.protocol = null;
     this.events   = {};
-    this.retryInterval   = 5000;
-    this.timer           = null;
-}
-
-WsProtocol.prototype.resetRetryInterval = function (interval) {
-    this.retryInterval = interval;
-    this.retry();
-}
-
-WsProtocol.prototype.retry = function() {
-    let self = this;
-    clearInterval(this.timer);
-    this.timer = setInterval(function (){
-        if(self.ws && self.ws.readyState < WebSocket.CLOSING) {
-            return;
-        }
-
-        if(!self.dial()) {
-            console.log('connect failed');
-        }
-    }, this.retryInterval);
-}
-
-WsProtocol.prototype.emit = function (pkg) {
-    try {
-        let msg = this.protocol.pack(pkg);
-        this.ws.send(msg);
-    }catch (e) {
-        console.log(e);
-    }
+    this.retryIng = false;
 }
 
 WsProtocol.prototype.buildUri = function () {
@@ -150,6 +121,23 @@ WsProtocol.prototype.buildUri = function () {
     return url;
 }
 
+WsProtocol.prototype.dial = function () {
+    let url = this.buildUri();
+    this.ws = new WebSocket(url);
+
+    this.initEvent();
+    this.healthCheck(30*1000);
+}
+
+WsProtocol.prototype.emit = function (pkg) {
+    try {
+        let msg = this.protocol.pack(pkg);
+        this.ws.send(msg);
+    }catch (e) {
+        console.log(e);
+    }
+}
+
 WsProtocol.prototype.trigger = function (eventId, data) {
     if(!(this.events[ eventId ])) {
         return;
@@ -164,13 +152,13 @@ WsProtocol.prototype.trigger = function (eventId, data) {
     }
 }
 
-WsProtocol.prototype.dial = function () {
-    let url = this.buildUri();
+WsProtocol.prototype.initEvent = function () {
     let self = this;
-
-    this.ws = new WebSocket(url);
-
     this.ws.onmessage = function (event) {
+        if(event.data === 'pong') {
+            return;
+        }
+
         let pkg = self.protocol.unpack(event.data);
         if(!pkg) {
             console.log('unpack failed', event);
@@ -182,21 +170,19 @@ WsProtocol.prototype.dial = function () {
     this.ws.onclose = function(event) {
         console.log('connection close', event);
         self.trigger(EventClose, event);
-    }
+    };
 
     this.ws.onopen = function (event) {
-        console.log('connect success', event);
-        self.trigger(EventConnectSuccess, event);
-    }
+        if(self.level < LevelV2) {
+            console.log('connect success', event);
+            self.trigger(EventConnectSuccess, event);
+        }
+    };
 
     this.ws.onerror = function (event) {
         console.log('error', event);
         self.trigger(EventError, event);
-    }
-
-    this.retry();
-
-    return true;
+    };
 }
 
 WsProtocol.prototype.on = function(eventName, handler) {
@@ -204,6 +190,50 @@ WsProtocol.prototype.on = function(eventName, handler) {
         this.events[eventName] = [];
     }
     this.events[eventName].push(handler);
+}
+
+WsProtocol.prototype.ok = function () {
+    return this.ws && this.ws.readyState < WebSocket.CLOSING;
+}
+
+WsProtocol.prototype.retry = function (timeout) {
+    if(this.retryIng || this.ok()) {
+        return;
+    }
+
+    this.retryIng = true;
+
+    let self = this;
+
+    setTimeout(function (){
+        if(self.ok()) {
+            self.retryIng = false;
+            return;
+        }
+
+        self.dial();
+        self.retryIng = false;
+    }, timeout);
+}
+
+WsProtocol.prototype.healthCheck = function (interval) {
+    var self = this;
+    if(this.healthTimer) {
+        clearInterval(this.healthTimer);
+    }
+
+    this.healthTimer = setInterval(function (){
+        if (self.ok()) {
+            try{
+                self.ws.send('ping');
+            }catch (e) {
+                console.log('ping error', e);
+            }
+            return;
+        }
+
+        self.dial();
+    }, interval);
 }
 
 function Json() {
